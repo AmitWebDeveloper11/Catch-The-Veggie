@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Catch The Veggie</title>
+    <link rel="icon" type="image/x-icon" href="image/favicon.png">
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js"></script>
+   <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <a href="https://www.amitpandey.site/" style="text-decoration: none;">
+        <div class="creator-credit">
+            Created by Amit Pandey❤️
+        </div>
+    </a>
+    <div class="game-container" id="gameContainer">
+        <div class="game-header">
+            <h1 class="game-title">Veggie Catch Challenge</h1>
+        </div>
+        
+        <div class="score-board">
+            <div class="score-item">
+                Score: <span id="score">0</span>
+            </div>
+            <div class="score-item">
+                Lives: <span id="lives">3</span>
+            </div>
+            <div class="score-item">
+                Level: <span id="level">1</span>
+            </div>
+            <div class="score-item">
+                High Score: <span id="highScore">0</span>
+            </div>
+        </div>
+        
+        <div class="game-canvas-container">
+            <canvas id="gameCanvas"></canvas>
+            <div class="game-over hidden" id="gameOver">
+                <h2>Game Over!</h2>
+                <p>Final Score: <span id="finalScore">0</span></p>
+                <p>New High Score: <span id="finalHighScore">0</span></p>
+                <button class="start-btn" onclick="startGame()">Play Again</button>
+            </div>
+            <div class="pause-popup hidden" id="pausePopup">
+                <h2>Game Paused</h2>
+                <button class="start-btn" onclick="resumeGame()">Resume</button>
+                <button class="start-btn" onclick="restartGame()">Restart</button>
+                <button class="start-btn" onclick="quitGame()">Quit</button>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <button class="start-btn" id="startBtn" onclick="startGame()">Start Game</button>
+            <p class="instructions">
+                Use ← → buttons/keys or swipe on the screen to move the basket. Catch veggies, avoid non-veg!
+            </p>
+        </div>
+        
+        <div class="mobile-controls">
+            <div class="control-btn" id="leftBtn">←</div>
+            <div class="control-btn" id="rightBtn">→</div>
+        </div>
+        
+        <div class="float-buttons">
+            <div class="float-btn" id="pauseBtn" onclick="togglePause()">⏸️</div>
+            <div class="float-btn" id="muteBtn" onclick="toggleMute()">🔇</div>
+        </div>
+    </div>
+
+    <audio id="backgroundMusic" loop muted>
+        <source src="/music/music.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
+    </audio>
+
+    <script>
+        // Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyDTZABFhgvSdbqFhqnaredZs9YUKngiBvk",
+            authDomain: "theveggiecatch.firebaseapp.com",
+            projectId: "theveggiecatch",
+            storageBucket: "theveggiecatch.firebasestorage.app",
+            messagingSenderId: "587117193013",
+            appId: "1:587117193013:web:d304f8a57d48d10120ce7c"
+        };
+
+        // Initialize Firebase with error handling
+        let db;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            console.log("Firebase initialized successfully");
+        } catch (error) {
+            console.error("Firebase initialization failed:", error);
+            // Continue game with localStorage fallback
+        }
+
+        let canvas, ctx, gameContainer;
+        let gameRunning = false;
+        let score = 0;
+        let lives = 3;
+        let level = 1;
+        let gameSpeed = 0.5;
+        let isPaused = true;
+        let isMuted = true;
+        let backgroundMusic;
+        let highScore = 0; // Initialize to 0 as a fallback
+        let animationFrameId;
+        let itemSpawnTimeout;
+
+        const INITIAL_BASKET_WIDTH = 70;
+        const INITIAL_BASKET_HEIGHT = 25;
+        const INITIAL_ITEM_SIZE = 22;
+
+        let basketWidth = INITIAL_BASKET_WIDTH;
+        let basketHeight = INITIAL_BASKET_HEIGHT;
+        let itemSize = INITIAL_ITEM_SIZE;
+
+        let basketX;
+        let basketVelocity = 0;
+        const basketAcceleration = 0.6;
+        const basketFriction = 0.9;
+        const maxBasketSpeed = 6;
+        let basketMoveTarget = null;
+
+        const items = [];
+        const maxItems = 8;
+        const veggies = [
+            { name: 'Carrot', emoji: '🥕', isVeggie: true },
+            { name: 'Broccoli', emoji: '🥦', isVeggie: true },
+            { name: 'Tomato', emoji: '🍅', isVeggie: true },
+            { name: 'Cucumber', emoji: '🥒', isVeggie: true },
+            { name: 'Corn', emoji: '🌽', isVeggie: true },
+            { name: 'Potato', emoji: '🥔', isVeggie: true },
+            { name: 'Mushroom', emoji: '🍄', isVeggie: true },
+            { name: 'Onion', emoji: '🧅', isVeggie: true },
+            { name: 'Garlic', emoji: '🧄', isVeggie: true },
+            { name: 'Hot Pepper', emoji: '🌶️', isVeggie: true },
+            { name: 'Leafy Green', emoji: '🥬', isVeggie: true },
+            { name: 'Avocado', emoji: '🥑', isVeggie: true }
+        ];
+        const nonVeggies = [
+            { name: 'Chicken', emoji: '🍗', isVeggie: false },
+            { name: 'Fish', emoji: '🐟', isVeggie: false },
+            { name: 'Egg', emoji: '🥚', isVeggie: false },
+            { name: 'Beef', emoji: '🥩', isVeggie: false },
+            { name: 'Shrimp', emoji: '🍤', isVeggie: false },
+            { name: 'Pork', emoji: '🍖', isVeggie: false },
+            { name: 'Crab', emoji: '🦀', isVeggie: false },
+            { name: 'Lobster', emoji: '🦞', isVeggie: false },
+            { name: 'Turkey', emoji: '🦃', isVeggie: false },
+            { name: 'Duck', emoji: '🦆', isVeggie: false },
+            { name: 'Octopus', emoji: '🐙', isVeggie: false },
+            { name: 'Sushi (Fish)', emoji: '🍣', isVeggie: false }
+        ];
+        const allItems = [...veggies, ...nonVeggies];
+        const gravity = 0.08;
+
+        const particles = [];
+
+        let isMovingLeft = false;
+        let isMovingRight = false;
+
+        async function initHighScore() {
+            try {
+                if (db) {
+                    const doc = await db.collection('highScores').doc('global').get();
+                    if (doc.exists) {
+                        highScore = doc.data().score || 0;
+                        console.log("High score fetched from Firestore:", highScore);
+                    } else {
+                        await db.collection('highScores').doc('global').set({ score: 0 });
+                        console.log("Initialized high score in Firestore");
+                    }
+                } else {
+                    console.warn("Firestore not available, using localStorage");
+                    highScore = parseInt(localStorage.getItem('highScore')) || 0;
+                }
+                updateHighScoreDisplay();
+            } catch (error) {
+                console.error('Error fetching high score:', error);
+                highScore = parseInt(localStorage.getItem('highScore')) || 0;
+                updateHighScoreDisplay();
+            }
+        }
+
+        async function initGame() {
+            canvas = document.getElementById('gameCanvas');
+            ctx = canvas.getContext('2d');
+            gameContainer = document.getElementById('gameContainer');
+            backgroundMusic = document.getElementById('backgroundMusic');
+            
+            document.getElementById('muteBtn').textContent = isMuted ? '🔇' : '🔊';
+
+            // Wait for high score to load
+            await initHighScore();
+
+            resizeCanvas();
+            updateDimensions();
+            basketX = (canvas.width / window.devicePixelRatio / 2) - (basketWidth / 2);
+            
+            setTimeout(() => {
+                resizeCanvas();
+                updateDimensions();
+                basketX = (canvas.width / window.devicePixelRatio / 2) - (basketWidth / 2);
+                draw();
+            }, 100);
+
+            window.addEventListener('resize', () => {
+                resizeCanvas();
+                updateDimensions();
+                basketX = (canvas.width / window.devicePixelRatio / 2) - (basketWidth / 2);
+                if (!gameRunning) {
+                    draw();
+                }
+            });
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => {
+                    resizeCanvas();
+                    updateDimensions();
+                    basketX = (canvas.width / window.devicePixelRatio / 2) - (basketWidth / 2);
+                    if (!gameRunning) {
+                        draw();
+                    }
+                }, 100);
+            });
+
+            document.addEventListener('keydown', handleKeyPress);
+            document.addEventListener('keyup', handleKeyRelease);
+            
+            setupMobileControls();
+            setupTouchAndMouseControls();
+            
+            draw();
+        }
+
+        function updateDimensions() {
+            const containerWidth = canvas.offsetWidth;
+            const containerHeight = canvas.offsetHeight;
+            const aspectRatio = containerWidth / containerHeight;
+            const baseWidth = 600;
+            const scaleFactor = Math.min(containerWidth / baseWidth, 1.2);
+            basketWidth = Math.max(40, INITIAL_BASKET_WIDTH * scaleFactor);
+            basketHeight = Math.max(12, INITIAL_BASKET_HEIGHT * scaleFactor);
+            itemSize = Math.max(14, INITIAL_ITEM_SIZE * scaleFactor * (aspectRatio > 1 ? 0.9 : 1));
+        }
+
+        function resizeCanvas() {
+            const container = document.querySelector('.game-canvas-container');
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = container.offsetWidth * dpr;
+            canvas.height = container.offsetHeight * dpr;
+            canvas.style.width = container.offsetWidth + 'px';
+            canvas.style.height = container.offsetHeight + 'px';
+            ctx.scale(dpr, dpr);
+        }
+
+        function startGame() {
+            if (gameRunning && !isPaused) return;
+
+            isMuted = false;
+            backgroundMusic.muted = false;
+            document.getElementById('muteBtn').textContent = '🔊';
+            
+            backgroundMusic.play().catch(e => {
+                console.warn('Audio play failed:', e);
+                isMuted = true;
+                backgroundMusic.muted = true;
+                document.getElementById('muteBtn').textContent = '🔇';
+            });
+
+            gameRunning = true;
+            isPaused = false;
+            score = 0;
+            lives = 3;
+            level = 1;
+            gameSpeed = 0.5;
+            items.length = 0;
+            particles.length = 0;
+            
+            updateDimensions();
+            basketX = (canvas.width / window.devicePixelRatio / 2) - (basketWidth / 2);
+            basketVelocity = 0;
+            basketMoveTarget = null;
+            isMovingLeft = false;
+            isMovingRight = false;
+            
+            document.getElementById('startBtn').classList.add('hidden');
+            document.getElementById('gameOver').classList.add('hidden');
+            document.getElementById('pausePopup').classList.add('hidden');
+            document.getElementById('pauseBtn').textContent = '⏸️';
+
+            updateScore();
+            gameLoop();
+            itemSpawner();
+        }
+
+        function restartGame() {
+            backgroundMusic.pause();
+            backgroundMusic.currentTime = 0;
+            startGame();
+        }
+
+        function togglePause() {
+            if (!gameRunning) return;
+            if (isPaused) {
+                resumeGame();
+            } else {
+                pauseGame();
+            }
+        }
+
+        function pauseGame() {
+            if (!gameRunning || isPaused) return;
+            gameRunning = false;
+            isPaused = true;
+            document.getElementById('pausePopup').classList.remove('hidden');
+            document.getElementById('pauseBtn').textContent = '▶️';
+            clearTimeout(itemSpawnTimeout);
+            cancelAnimationFrame(animationFrameId);
+            backgroundMusic.pause();
+        }
+
+        function resumeGame() {
+            if (!isPaused) return;
+            isPaused = false;
+            gameRunning = true;
+            document.getElementById('pausePopup').classList.add('hidden');
+            document.getElementById('pauseBtn').textContent = '⏸️';
+            itemSpawner();
+            gameLoop();
+            if (!isMuted) {
+                backgroundMusic.play().catch(e => console.warn('Audio resume failed:', e));
+            }
+        }
+
+        function quitGame() {
+            gameRunning = false;
+            isPaused = true;
+            document.getElementById('pausePopup').classList.add('hidden');
+            document.getElementById('startBtn').classList.remove('hidden');
+            items.length = 0;
+            particles.length = 0;
+            clearTimeout(itemSpawnTimeout);
+            cancelAnimationFrame(animationFrameId);
+            updateScore();
+            
+            resizeCanvas();
+            updateDimensions();
+            basketX = (canvas.width / window.devicePixelRatio / 2) - (basketWidth / 2);
+            draw();
+            
+            backgroundMusic.pause();
+        }
+
+        function toggleMute() {
+            if (!gameRunning) return;
+            isMuted = !isMuted;
+            backgroundMusic.muted = isMuted;
+            document.getElementById('muteBtn').textContent = isMuted ? '🔇' : '🔊';
+            
+            if (!isMuted && gameRunning) {
+                backgroundMusic.play().catch(e => console.warn('Audio play failed:', e));
+            }
+        }
+
+        async function updateHighScore() {
+            if (score > highScore) {
+                highScore = score;
+                try {
+                    if (db) {
+                        await db.collection('highScores').doc('global').update({ score: highScore });
+                        console.log("High score updated in Firestore:", highScore);
+                    } else {
+                        console.warn("Firestore not available, using localStorage");
+                        localStorage.setItem('highScore', highScore);
+                    }
+                    updateHighScoreDisplay();
+                } catch (error) {
+                    console.error('Error updating high score:', error);
+                    localStorage.setItem('highScore', highScore);
+                    updateHighScoreDisplay();
+                }
+            }
+        }
+
+        function updateHighScoreDisplay() {
+            document.getElementById('highScore').textContent = highScore;
+            document.getElementById('finalHighScore').textContent = highScore;
+        }
+
+        function gameLoop() {
+            if (!gameRunning || isPaused) return;
+            
+            update();
+            draw();
+            
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        function update() {
+            const canvasWidth = canvas.width / window.devicePixelRatio;
+
+            if (basketMoveTarget !== null) {
+                const centerBasket = basketX + basketWidth / 2;
+                const diff = basketMoveTarget - centerBasket;
+                const moveSpeed = Math.min(Math.abs(diff), maxBasketSpeed * 1.5);
+                basketX += Math.sign(diff) * moveSpeed;
+                basketX = Math.max(0, Math.min(canvasWidth - basketWidth, basketX));
+                if (Math.abs(diff) < 2) basketMoveTarget = null;
+            } else {
+                if (isMovingLeft) basketVelocity -= basketAcceleration;
+                if (isMovingRight) basketVelocity += basketAcceleration;
+                
+                basketVelocity *= basketFriction;
+                basketVelocity = Math.max(-maxBasketSpeed, Math.min(maxBasketSpeed, basketVelocity));
+                basketX += basketVelocity;
+                
+                basketX = Math.max(0, Math.min(canvasWidth - basketWidth, basketX));
+            }
+            
+            const floorY = canvas.height / window.devicePixelRatio - basketHeight;
+
+            for (let i = items.length - 1; i >= 0; i--) {
+                const item = items[i];
+                item.velocityY += gravity;
+                item.y += item.velocityY * gameSpeed;
+                
+                if (item.y + itemSize / 2 >= floorY && 
+                    item.x >= basketX && item.x <= basketX + basketWidth) {
+                    
+                    if (item.isVeggie) {
+                        score += 10 * level;
+                        createParticles(item.x, floorY, '#4CAF50', true);
+                    } else {
+                        lives--;
+                        createParticles(item.x, floorY, '#FF0000', false);
+                        triggerHapticFeedback();
+                        if (lives <= 0) {
+                            gameOver();
+                            return;
+                        }
+                    }
+                    
+                    items.splice(i, 1);
+                    updateScore();
+                    updateHighScore();
+                    continue;
+                }
+                
+                if (item.y - itemSize / 2 > canvas.height / window.devicePixelRatio) {
+                    if (item.isVeggie) {
+                        lives--;
+                        createParticles(item.x, canvas.height / window.devicePixelRatio, '#FF0000', false);
+                        triggerHapticFeedback();
+                        if (lives <= 0) {
+                            gameOver();
+                            return;
+                        }
+                    }
+                    items.splice(i, 1);
+                    updateScore();
+                }
+            }
+            
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const particle = particles[i];
+                particle.x += particle.vx;
+                particle.y += particle.vy;
+                particle.alpha -= 0.02;
+                
+                if (particle.alpha <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+            
+            const scoreToNextLevel = level * 100;
+            if (score >= scoreToNextLevel) {
+                level++;
+                gameSpeed = 0.5 + (level * 0.1);
+                updateScore();
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const canvasHeight = canvas.height / window.devicePixelRatio;
+            
+            particles.forEach(particle => {
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                ctx.fillStyle = particle.color;
+                ctx.globalAlpha = particle.alpha;
+                ctx.fill();
+                ctx.closePath();
+            });
+            ctx.globalAlpha = 1;
+            
+            items.forEach(item => {
+                ctx.save();
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+                ctx.shadowBlur = 8;
+                ctx.shadowOffsetY = 4;
+                ctx.font = `${itemSize}px Arial`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(item.emoji, item.x, item.y);
+                ctx.restore();
+            });
+            
+            ctx.save();
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+            ctx.shadowBlur = 15;
+            ctx.shadowOffsetY = 7;
+            
+            const basketGradient = ctx.createLinearGradient(basketX, canvasHeight - basketHeight, basketX, canvasHeight);
+            basketGradient.addColorStop(0, '#8d6e63');
+            basketGradient.addColorStop(0.5, '#bcaaa4');
+            basketGradient.addColorStop(1, '#d7ccc8');
+            
+            ctx.fillStyle = basketGradient;
+            ctx.beginPath();
+            ctx.moveTo(basketX, canvasHeight - basketHeight);
+            ctx.lineTo(basketX + basketWidth, canvasHeight - basketHeight);
+            ctx.lineTo(basketX + basketWidth - 15 * (basketWidth / INITIAL_BASKET_WIDTH), canvasHeight);
+            ctx.lineTo(basketX + 15 * (basketWidth / INITIAL_BASKET_WIDTH), canvasHeight);
+            ctx.closePath();
+            ctx.fill();
+            
+            ctx.strokeStyle = '#5d4037';
+            ctx.lineWidth = 3 * (basketWidth / INITIAL_BASKET_WIDTH) * 0.5;
+            ctx.stroke();
+            
+            ctx.restore();
+        }
+
+        function itemSpawner() {
+            if (!gameRunning || isPaused) return;
+            
+            const baseInterval = 1600;
+            const minInterval = 600;
+            const intervalDecrease = (baseInterval - minInterval) / 10;
+            const spawnInterval = Math.max(minInterval, baseInterval - ((level - 1) * intervalDecrease));
+            
+            itemSpawnTimeout = setTimeout(() => {
+                if (gameRunning && items.length < maxItems && !isPaused) {
+                    spawnItem();
+                    itemSpawner();
+                }
+            }, spawnInterval * (0.8 + Math.random() * 0.4));
+        }
+
+        function spawnItem() {
+            const item = allItems[Math.floor(Math.random() * allItems.length)];
+            const canvasWidth = canvas.width / window.devicePixelRatio;
+            const x = Math.random() * (canvasWidth - itemSize) + itemSize / 2;
+            
+            items.push({
+                x: x,
+                y: -itemSize / 2,
+                emoji: item.emoji,
+                isVeggie: item.isVeggie,
+                size: itemSize,
+                velocityY: 0
+            });
+        }
+
+        function createParticles(x, y, color, isSuccess) {
+            const particleCount = isSuccess ? 15 : 10;
+            for (let i = 0; i < particleCount; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 4,
+                    vy: (Math.random() * -3) + (isSuccess ? -1 : 1),
+                    size: Math.random() * 2 + 1,
+                    color: color,
+                    alpha: 1
+                });
+            }
+        }
+
+        function triggerHapticFeedback() {
+            if ('vibrate' in navigator) {
+                navigator.vibrate(50);
+            }
+        }
+
+        function handleKeyPress(e) {
+            if (!gameRunning || isPaused) return;
+            
+            switch(e.key) {
+                case 'ArrowLeft':
+                    isMovingLeft = true;
+                    basketMoveTarget = null;
+                    break;
+                case 'ArrowRight':
+                    isMovingRight = true;
+                    basketMoveTarget = null;
+                    break;
+                case 'Escape':
+                    togglePause();
+                    break;
+            }
+        }
+
+        function handleKeyRelease(e) {
+            if (!gameRunning || isPaused) return;
+            
+            switch(e.key) {
+                case 'ArrowLeft':
+                    isMovingLeft = false;
+                    break;
+                case 'ArrowRight':
+                    isMovingRight = false;
+                    break;
+            }
+        }
+
+        let isDragging = false;
+
+        function setupTouchAndMouseControls() {
+            const updateCanvasRect = () => canvas.getBoundingClientRect();
+            let canvasRect = updateCanvasRect();
+            
+            window.addEventListener('resize', () => { canvasRect = updateCanvasRect(); });
+            window.addEventListener('orientationchange', () => {
+                setTimeout(() => { canvasRect = updateCanvasRect(); }, 100);
+            });
+            
+            const startDrag = (clientX) => {
+                if (!gameRunning || isPaused) return;
+                isDragging = true;
+                basketVelocity = 0;
+                basketMoveTarget = null;
+                const canvasX = (clientX - canvasRect.left) / (window.devicePixelRatio || 1);
+                basketMoveTarget = canvasX;
+            };
+
+            const dragMove = (clientX) => {
+                if (!gameRunning || isPaused || !isDragging) return;
+                const canvasX = (clientX - canvasRect.left) / (window.devicePixelRatio || 1);
+                basketMoveTarget = canvasX;
+            };
+
+            const endDrag = () => {
+                isDragging = false;
+                basketVelocity = 0;
+                basketMoveTarget = null;
+            };
+
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                canvasRect = updateCanvasRect();
+                startDrag(e.touches[0].clientX);
+            }, { passive: false });
+
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                dragMove(e.touches[0].clientX);
+            }, { passive: false });
+
+            canvas.addEventListener('touchend', (e) => {
+                e.preventDefault();
+                endDrag();
+            });
+
+            canvas.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                canvasRect = updateCanvasRect();
+                startDrag(e.clientX);
+            });
+
+            canvas.addEventListener('mousemove', (e) => {
+                dragMove(e.clientX);
+            });
+
+            canvas.addEventListener('mouseup', (e) => {
+                e.preventDefault();
+                endDrag();
+            });
+
+            canvas.addEventListener('mouseleave', endDrag);
+        }
+
+        function setupMobileControls() {
+            const leftBtn = document.getElementById('leftBtn');
+            const rightBtn = document.getElementById('rightBtn');
+            
+            const startMove = (direction) => {
+                if (!gameRunning || isPaused) return;
+                basketMoveTarget = null;
+                if (direction === 'left') isMovingLeft = true;
+                if (direction === 'right') isMovingRight = true;
+                triggerHapticFeedback();
+            };
+
+            const endMove = (direction) => {
+                if (direction === 'left') isMovingLeft = false;
+                if (direction === 'right') isMovingRight = false;
+            };
+
+            const commonEvents = [
+                { el: leftBtn, dir: 'left' },
+                { el: rightBtn, dir: 'right' }
+            ];
+
+            commonEvents.forEach(({ el, dir }) => {
+                el.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    startMove(dir);
+                }, { passive: false });
+                el.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    endMove(dir);
+                });
+                el.addEventListener('mousedown', (e) => {
+                    e.preventDefault();
+                    startMove(dir);
+                });
+                el.addEventListener('mouseup', (e) => {
+                    e.preventDefault();
+                    endMove(dir);
+                });
+                el.addEventListener('mouseleave', () => endMove(dir));
+            });
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = score;
+            document.getElementById('lives').textContent = lives;
+            document.getElementById('level').textContent = level;
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            isPaused = true;
+            cancelAnimationFrame(animationFrameId);
+            clearTimeout(itemSpawnTimeout);
+            updateHighScore();
+            document.getElementById('finalScore').textContent = score;
+            document.getElementById('gameOver').classList.remove('hidden');
+            document.getElementById('startBtn').classList.remove('hidden');
+            triggerHapticFeedback();
+            backgroundMusic.pause();
+        }
+
+        window.onload = initGame;
+    </script>
+</body>
+</html>
