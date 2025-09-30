@@ -347,9 +347,9 @@ canvas {
     .creator-credit {
         top: auto;
         bottom: 10px;
-        left: 50%;
+        left: 12%;
         transform: translateX(-50%);
-        font-size: 7px;
+        font-size: 5px;
         padding: 6px 12px;
     }
 }
