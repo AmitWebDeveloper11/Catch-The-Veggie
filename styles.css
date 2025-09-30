@@ -74,7 +74,7 @@ body {
 
 .game-canvas-container {
     position: relative;
-     border: 1px solid rgba(42, 231, 102, 0.547);
+    border: 1px solid rgba(42, 231, 102, 0.547);
     width: 100%;
     flex-grow: 1;
     background: rgba(0, 0, 0, 0.2);
@@ -345,8 +345,10 @@ canvas {
         margin-right: 15px;
     }
     .creator-credit {
-        top: 33rem;
-        left: 2px;
+        top: auto;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
         font-size: 7px;
         padding: 6px 12px;
     }
